@@ -297,7 +297,6 @@ void enclaves_read(struct enclaves *enclaves)
 			 * from the list of old enclaves.
 			 */
 			LIST_REMOVE(e, state_entry[old_state]);
-			enclaves_check_list(enclaves);
 		} else {
 			e = malloc(sizeof(struct enclave));
 			if (!e)
@@ -308,12 +307,10 @@ void enclaves_read(struct enclaves *enclaves)
 			e->comm = pid_read_comm(e->pid);
 
 			enclaves_insert(enclaves, e);
-			enclaves_check_list(enclaves);
 		}
 		/* Insert everybody in the list of current enclaves */
 		LIST_INSERT_HEAD(&enclaves->state_list[new_state],
 				 e, state_entry[new_state]);
-		enclaves_check_list(enclaves);
 	}
 	fclose(fp);
 
@@ -333,31 +330,65 @@ void enclaves_read(struct enclaves *enclaves)
 	assert(enclaves->state_list[old_state].lh_first == NULL);
 }
 
+int enclave_compar(const void *fv, const void *sv)
+{
+	const struct enclave **f = (const struct enclave **) fv;
+	const struct enclave **s = (const struct enclave **) sv;
+
+	/*
+	 * Simple sort by resident set size and ID;  note that we
+	 * have to be careful about signed arithmetic.
+	 */
+	long long int rc = (long long int) (*f)->resident -
+		(long long int) (*s)->resident;
+
+	if (rc == 0)
+		rc = (long long) (*f)->id - (long long) (*s)->id;
+
+	if (rc > 1)
+		return 1;
+	else if (rc < 1)
+		return -1;
+	else
+		return 0;
+}
+
 void enclaves_report(struct enclaves *enclaves)
 {
+	struct enclave *list[enclaves->count];
 	struct enclave *e;
 	unsigned line = 4;
+	size_t count = 0;
 	static unsigned last_lines;
 
 	mvprintw(line++, 0, "%5s %10s %11s %11s %11s %10s",
 		 "PID", "ID", "Size", "EADDed", "Resident", "Command");
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
+		list[count++] = e;
+	}
+	assert(count == enclaves->count);
+
+	qsort(list, enclaves->count, sizeof(struct enclave *), enclave_compar);
+
+	for (count = 0; line < LINES && count < enclaves->count;
+	     count++, line++) {
 		assert(line <= enclaves->count + 4 /* initial count */);
-		if (line < LINES)
-			mvprintw(line++, 0, "%5d %10u %10luK %10luK %10luK %s",
-				 e->pid, e->id, e->size / 1024,
-				 e->eadd_cnt * 4, e->resident * 4,
-				 e->comm ? e->comm : "");
+		e = list[count];
+		mvprintw(line, 0, "%5d %10u %10luK %10luK %10luK %s",
+			 e->pid, e->id, e->size / 1024,
+			 e->eadd_cnt * 4, e->resident * 4,
+			 e->comm ? e->comm : "");
 	}
 
 	/* Clear any leftover lines from the last display */
+	int current_lines = line;
 	while (last_lines > line) {
 		move(line++, 0);
 		clrtoeol();
 	}
 	refresh();
-	last_lines = line;
+	last_lines = current_lines;
 }
 
 int main(int argc, char **argv)
