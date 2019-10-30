@@ -61,19 +61,19 @@ struct stats {
 	struct timespec readtime;
 };
 
-LIST_HEAD(enclave_head, enclave);
-
 struct enclave {
 	pid_t pid;
 	unsigned int id;
-	char *comm; /* command executing */
 	unsigned long size;
 	unsigned long eadd_cnt;
 	unsigned long resident;
-	unsigned long old_eadd_cnt;
-	unsigned long old_resident;
-	LIST_ENTRY(enclave) state_entry[2];
-	LIST_ENTRY(enclave) hash_entry;
+};
+
+struct enclave_entry {
+	struct enclave enclave;
+	char *command; /* process command line */
+	LIST_ENTRY(enclave_entry) state_entry[2];
+	LIST_ENTRY(enclave_entry) hash_entry;
 };
 
 #ifdef DEBUG
@@ -86,6 +86,8 @@ FILE *enclave_log;
  * Put them in the new list as they are read.  Remove the old
  * list when we've read all of the new enclaves.
  */
+
+LIST_HEAD(enclave_head, enclave_entry);
 
 struct enclaves {
 	unsigned int count;
@@ -191,11 +193,11 @@ void stats_report(struct stats *old, struct stats *new)
 	refresh();
 }
 
-char *pid_read_comm(pid_t pid)
+char *pid_read_command(pid_t pid)
 {
 	FILE *fp;
 	char filename[] = "/proc/1234567890/comm";
-	char comm[TS_COMM_LEN];
+	char command[TS_COMM_LEN];
 	char *result;
 
 	snprintf(filename, sizeof(filename), "/proc/%d/comm", pid);
@@ -203,10 +205,10 @@ char *pid_read_comm(pid_t pid)
 	if (!fp)
 		return NULL;
 
-	fgets(comm, sizeof(comm), fp);
+	fgets(command, sizeof(command), fp);
 	fclose(fp);
 
-	result = strdup(comm);
+	result = strdup(command);
 	return result;
 }
 
@@ -232,18 +234,18 @@ int enclave_read(FILE *fp, struct enclave *enclave)
 	return 0;
 }
 
-int enclave_update(struct enclave *o, struct enclave *n, unsigned which)
+int enclave_update(struct enclave_entry *o, struct enclave *n, unsigned which)
 {
-	assert(o->id == n->id);
-	o->old_eadd_cnt = o->eadd_cnt;
-	o->old_resident = o->resident;
-	o->eadd_cnt = n->eadd_cnt;
-	o->resident = n->resident;
+	assert(o->enclave.id == n->id && o->enclave.pid == n->pid);
+	o->enclave = *n;
 }
 
-int enclave_delete(struct enclaves *enclaves, struct enclave *e,
+int enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
 		    unsigned which)
 {
+	if (e->command) {
+		free(e->command);
+	}
 	free(e);
 }
 
@@ -272,28 +274,28 @@ struct enclaves *enclaves_create(size_t n)
 	LIST_INIT(&e->state_list[1]);
 }
 
-struct enclave *enclaves_find(struct enclaves *enclaves, unsigned int id)
+struct enclave_entry *enclaves_find(struct enclaves *enclaves, unsigned int id)
 {
 	size_t bucket = hash_func(enclaves, id);
-	struct enclave *e = LIST_FIRST(&enclaves->hash_table[bucket]);
+	struct enclave_entry *e = LIST_FIRST(&enclaves->hash_table[bucket]);
 
 	while (e) {
-		if (e->id == id)
+		if (e->enclave.id == id)
 			return e;
 		e = LIST_NEXT(e, hash_entry);
 	}
 	return NULL;
 }
 
-int enclaves_insert(struct enclaves *enclaves, struct enclave *e)
+int enclaves_insert(struct enclaves *enclaves, struct enclave_entry *e)
 {
-	size_t bucket = hash_func(enclaves, e->id);
+	size_t bucket = hash_func(enclaves, e->enclave.id);
 	LIST_INSERT_HEAD(&enclaves->hash_table[bucket], e, hash_entry);
 }
 
 void enclaves_check_list(struct enclaves *enclaves)
 {
-	struct enclave *e;
+	struct enclave_entry *e;
 	int count = 0;
 
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
@@ -323,7 +325,7 @@ void enclaves_read(struct enclaves *enclaves)
 	}
 
 	struct enclave enclave;
-	struct enclave *e;
+	struct enclave_entry *e;
 
 	enclaves->count = 0;
 	while (!enclave_read(fp, &enclave)) {
@@ -338,13 +340,12 @@ void enclaves_read(struct enclaves *enclaves)
 			 */
 			LIST_REMOVE(e, state_entry[old_state]);
 		} else {
-			e = malloc(sizeof(struct enclave));
+			e = malloc(sizeof(struct enclave_entry));
 			if (!e)
 				continue;  /* Skip it? */
 
-			*e = enclave;
-			e->old_eadd_cnt = e->old_resident = 0;
-			e->comm = pid_read_comm(e->pid);
+			e->enclave = enclave;
+			e->command = pid_read_command(e->enclave.pid);
 
 			enclaves_insert(enclaves, e);
 		}
@@ -395,8 +396,8 @@ int enclave_compar(const void *fv, const void *sv)
 
 void enclaves_report(struct enclaves *enclaves)
 {
-	struct enclave *list[enclaves->count];
-	struct enclave *e;
+	struct enclave_entry *list[enclaves->count];
+	struct enclave_entry *e;
 	unsigned line = 4;
 	size_t count = 0;
 	static unsigned last_lines;
@@ -409,16 +410,17 @@ void enclaves_report(struct enclaves *enclaves)
 	}
 	assert(count == enclaves->count);
 
-	qsort(list, enclaves->count, sizeof(struct enclave *), enclave_compar);
+	qsort(list, enclaves->count, sizeof(struct enclave_entry *),
+	      enclave_compar);
 
 	for (count = 0; line < LINES && count < enclaves->count;
 	     count++, line++) {
 		assert(line <= enclaves->count + 4 /* initial count */);
 		e = list[count];
 		mvprintw(line, 0, "%5d %10u %10luK %10luK %10luK %s",
-			 e->pid, e->id, e->size / 1024,
-			 e->eadd_cnt * 4, e->resident * 4,
-			 e->comm ? e->comm : "");
+			 e->enclave.pid, e->enclave.id, e->enclave.size / 1024,
+			 e->enclave.eadd_cnt * 4, e->enclave.resident * 4,
+			 e->command ? e->command : "");
 	}
 
 	/* Clear any leftover lines from the last display */
