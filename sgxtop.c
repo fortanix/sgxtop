@@ -1,7 +1,7 @@
 /*
  * BSD LICENSE
  *
- * Copyright (C) 2018 Fortanix, Inc. All Rights Reserved.
+ * Copyright (C) 2019 Fortanix, Inc. All Rights Reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -31,7 +31,7 @@
  *
  * Authors:
  *
- * Kevin Lahey <kevin.lahey@fortanix.com
+ * Kevin Lahey <kevin.lahey@fortanix.com>
  */
 
 #include <stdio.h>
@@ -76,16 +76,15 @@ struct enclave {
 	LIST_ENTRY(enclave) hash_entry;
 };
 
+#ifdef DEBUG
 FILE *enclave_log;
+#endif
 
 /*
  * Keep an old and a new  list of enclaves, and a hash table.
  * Look 'em up quickly in the hash table as we read them.
  * Put them in the new list as they are read.  Remove the old
  * list when we've read all of the new enclaves.
- *
- * XXX:  When do we sort 'em?  Create an array and then sort that?
- * Guess so.
  */
 
 struct enclaves {
@@ -96,6 +95,18 @@ struct enclaves {
 	struct enclave_head state_list[2];
 	struct timespec readtime;
 };
+
+#define NSEC_PER_SEC 1000000000
+
+long int timespec_diff(struct timespec *later, struct timespec *earlier)
+{
+	long int diff = (later->tv_sec - earlier->tv_sec) * NSEC_PER_SEC;
+
+	diff += later->tv_nsec - earlier->tv_nsec;
+	assert(diff >= 0);
+
+	return diff;
+}
 
 int sleep_til(struct timespec *when)
 {
@@ -148,8 +159,35 @@ void stats_report(struct stats *old, struct stats *new)
 		 new->enclave_pages * 4);
 	printw("  %30s va/used/tot mem", enclave_str);
 
-	mvprintw(1, 0, "%10luK pageins", new->pageins - old->pageins);
-	mvprintw(2, 0, "%10luK pageouts", new->pageouts - old->pageouts);
+	long int time_diff = timespec_diff(&new->readtime, &old->readtime);
+
+	long unsigned pageins = new->pageins - old->pageins;
+	long unsigned pageouts = new->pageins - old->pageins;
+	if (time_diff != 0) {
+		pageins = 4 * pageins * NSEC_PER_SEC / time_diff;
+		pageouts = 4 * pageouts * NSEC_PER_SEC / time_diff;
+	} else {
+		pageins = 0;
+		pageouts = 0;
+	}
+
+	static long unsigned max_pageins;
+	static long unsigned max_pageouts;
+
+	/*
+	 * Only update the max paging rates if we got a decent sample
+	 * size;  in some cases we see extremely short delays.
+	 */
+	if (pageins > max_pageins)
+		max_pageins = pageins;
+	if (pageouts > max_pageouts)
+		max_pageouts = pageouts;
+	mvprintw(1, 0,
+		 "%10luK pageins (per sec)    %10luK max pageins (per sec)",
+		 pageins, max_pageins);
+	mvprintw(2, 0,
+		 "%10luK pageouts (per sec)   %10luK max pageouts (per sec)",
+		 pageouts, max_pageouts);
 	refresh();
 }
 
@@ -181,6 +219,7 @@ int enclave_read(FILE *fp, struct enclave *enclave)
 	if (r != 5)
 		return -1;
 
+#ifdef DEBUG
 	if (enclave_log) {
 		fprintf(enclave_log, "%d %u %lu %lu %lu\n",
 			enclave->pid, enclave->id,
@@ -188,6 +227,7 @@ int enclave_read(FILE *fp, struct enclave *enclave)
 			enclave->resident);
 		fflush(enclave_log);
 	}
+#endif
 
 	return 0;
 }
@@ -362,7 +402,7 @@ void enclaves_report(struct enclaves *enclaves)
 	static unsigned last_lines;
 
 	mvprintw(line++, 0, "%5s %10s %11s %11s %11s %10s",
-		 "PID", "ID", "Size", "EADDed", "Resident", "Command");
+		 "PID", "ID", "Size", "EADDs", "Resident", "Command");
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
 		list[count++] = e;
@@ -410,13 +450,15 @@ int main(int argc, char **argv)
 	curs_set(0);
 	clear();
 
+#ifdef DEBUG
 	enclave_log = fopen("/tmp/enclave_log", "w");
+#endif
 
-	struct timespec now = new.readtime;
+	struct timespec wait= new.readtime;
 	while (1) {
 		old = new;
-		now.tv_sec++;
-		if (sleep_til(&now))
+		wait.tv_sec++;
+		if (sleep_til(&wait))
 			exit(-1);
 		if (stats_read(&new))
 			exit(-1);
