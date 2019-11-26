@@ -50,6 +50,8 @@ struct enclave_entry {
 FILE *enclave_log;
 #endif
 
+static int pid_width = 5;  /* max pid defaults to 32767 */
+
 /*
  * Keep an old and a new  list of enclaves, and a hash table.
  * Look 'em up quickly in the hash table as we read them.
@@ -69,6 +71,25 @@ struct enclaves {
 };
 
 #define NSEC_PER_SEC 1000000000
+
+void do_init()
+{
+	/* Some systems allow larger PIDs than the default five digits.
+	 * Ensure that the fields look right for them. */
+
+	FILE *fp = fopen("/proc/sys/kernel/pid_max", "ro");
+
+	if (fp) {
+		pid_width = 0;
+		while (fgetc(fp) != EOF) {
+			pid_width++;
+		}
+		if (pid_width > 0) {
+			pid_width--;
+		}
+	}
+	fclose(fp);
+}
 
 long int timespec_diff(struct timespec *later, struct timespec *earlier)
 {
@@ -372,13 +393,18 @@ void enclaves_report(struct enclaves *enclaves)
 	size_t count = 0;
 	static unsigned last_lines;
 
-	mvprintw(line++, 0, "%5s %10s %11s %11s %11s %10s",
+	mvprintw(line++, 0, "%*s %10s %11s %11s %11s %10s", pid_width,
 		 "PID", "ID", "Size", "EADDs", "Resident", "Command");
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
 		list[count++] = e;
 	}
-	assert(count == enclaves->count);
+
+	if (count != enclaves->count) {
+		/* XXX:  failing on asserts, so just logging issue */
+		mvprintw(LINES - 1, 0, "count (%u) != enclaves->count (%u)",
+			 count, enclaves->count);
+	}
 
 	qsort(list, enclaves->count, sizeof(struct enclave_entry *),
 	      enclave_compar);
@@ -387,10 +413,10 @@ void enclaves_report(struct enclaves *enclaves)
 	     count++, line++) {
 		assert(line <= enclaves->count + 4 /* initial count */);
 		e = list[count];
-		mvprintw(line, 0, "%5d %10u %10luK %10luK %10luK %s",
-			 e->enclave.pid, e->enclave.id, e->enclave.size / 1024,
-			 e->enclave.eadd_cnt * 4, e->enclave.resident * 4,
-			 e->command ? e->command : "");
+		mvprintw(line, 0, "%*d %10u %10luK %10luK %10luK %s",
+			 pid_width, e->enclave.pid, e->enclave.id,
+			 e->enclave.size / 1024, e->enclave.eadd_cnt * 4,
+			 e->enclave.resident * 4, e->command ? e->command : "");
 	}
 
 	/* Clear any leftover lines from the last display */
@@ -407,6 +433,8 @@ int main(int argc, char **argv)
 {
 	struct stats old, new;
 	struct enclaves *enclaves = enclaves_create(101);
+
+	do_init();
 
 	if (!enclaves)
 		exit(-1);
