@@ -46,11 +46,18 @@ struct enclave_entry {
 	LIST_ENTRY(enclave_entry) hash_entry;
 };
 
-#ifdef DEBUG
+/* DEBUG_WRITE will write out the sgx values read to repro issues */
+//#define DEBUG_WRITE
+/* DEBUG_READ will read from previously-logged values for debugging */
+//#define DEBUG_READ
+#ifdef DEBUG_WRITE
 FILE *enclave_log;
 #endif
+#ifdef DEBUG_READ
+FILE *enclave_input;
+#endif
 
-static int pid_width = 5;  /* max pid defaults to 32767 */
+static int pid_width = 10;  /* pick a really big size and adjust down */
 
 /*
  * Keep an old and a new  list of enclaves, and a hash table.
@@ -74,7 +81,10 @@ struct enclaves {
 
 void do_init()
 {
-	/* Some systems allow larger PIDs than the default five digits.
+#ifdef DEBUG_READ
+	pid_width = 10;
+#else
+	/* Some systems allow larger PIDs than the default of 32767.
 	 * Ensure that the fields look right for them. */
 
 	FILE *fp = fopen("/proc/sys/kernel/pid_max", "ro");
@@ -89,6 +99,7 @@ void do_init()
 		}
 	}
 	fclose(fp);
+#endif
 }
 
 long int timespec_diff(struct timespec *later, struct timespec *earlier)
@@ -107,8 +118,12 @@ int sleep_til(struct timespec *when)
 	int rc;
 	while (rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
 				    when, NULL)) {
-		if (rc != EINTR)
+		if (rc != EINTR) {
+			fprintf(stderr,
+				"clock_nanosleep(2) returned %d, errno %d\n",
+				rc, errno);
 			return rc;
+		}
 	}
 	return rc;
 }
@@ -117,21 +132,45 @@ int stats_read(struct stats *stats)
 {
 	FILE *fp;
 
-	if (!(fp = fopen(SGX_STATS, "ro")))
+#ifdef DEBUG_READ
+	fp = enclave_input;
+#else
+	if (!(fp = fopen(SGX_STATS, "ro"))) {
+		fprintf(stderr, "failed to read %s\n", SGX_STATS);
 		return -1;
+	}
+#endif
 
-	int r = fscanf(fp, "%u %u %lu %lu %lu %u %u %u",
+	int r = fscanf(fp, "%u %u %lu %lu %lu %u %u %u\n",
 		       &stats->enclaves_created, &stats->enclaves_released,
 		       &stats->pages_added, &stats->pageins, &stats->pageouts,
 		       &stats->enclave_pages, &stats->va_pages,
 		       &stats->free_pages);
+#ifndef DEBUG_READ
 	fclose(fp);
-	if (r != 8)
+#endif
+	if (r != 8) {
+		fprintf(stderr, "expect to read %d entries from %s, got %d\n",
+			8, SGX_STATS, r);
 		return -1;
+	}
 
 	r = clock_gettime(CLOCK_MONOTONIC, &stats->readtime);
-	if (r)
+	if (r) {
+		fprintf(stderr, "clock_gettime(3) returned %d, errno %d\n",
+			r, errno);
 		return r;
+	}
+#ifdef DEBUG_WRITE
+	if (enclave_log) {
+		fprintf(enclave_log, "%u %u %lu %lu %lu %u %u %u\n",
+			stats->enclaves_created, stats->enclaves_released,
+			stats->pages_added, stats->pageins, stats->pageouts,
+			stats->enclave_pages, stats->va_pages,
+			stats->free_pages);
+		fflush(enclave_log);
+	}
+#endif
 
 	return 0;
 }
@@ -187,7 +226,7 @@ void stats_report(struct stats *old, struct stats *new)
 char *pid_read_command(pid_t pid)
 {
 	FILE *fp;
-	char filename[] = "/proc/1234567890/comm";
+	char filename[sizeof("/proc//comm") + pid_width];
 	char command[TS_COMM_LEN];
 	char *result;
 
@@ -205,14 +244,24 @@ char *pid_read_command(pid_t pid)
 
 int enclave_read(FILE *fp, struct enclave *enclave)
 {
+	char line[80];
+
+#ifdef DEBUG_READ
+	assert(fgets(line, sizeof(line), fp));
+	int r = sscanf(line, "%d %u %lu %lu %lu\n",
+		       &enclave->pid, &enclave->id,
+		       &enclave->size, &enclave->eadd_cnt,
+		       &enclave->resident);
+#else
 	int r = fscanf(fp, "%d %u %lu %lu %lu",
 		       &enclave->pid, &enclave->id,
 		       &enclave->size, &enclave->eadd_cnt,
 		       &enclave->resident);
+#endif
 	if (r != 5)
 		return -1;
 
-#ifdef DEBUG
+#ifdef DEBUG_WRITE
 	if (enclave_log) {
 		fprintf(enclave_log, "%d %u %lu %lu %lu\n",
 			enclave->pid, enclave->id,
@@ -237,6 +286,7 @@ int enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
 	if (e->command) {
 		free(e->command);
 	}
+    memset(e, 0, sizeof(struct enclave_entry));
 	free(e);
 }
 
@@ -291,14 +341,12 @@ void enclaves_check_list(struct enclaves *enclaves)
 
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
-		assert(count++ <= enclaves->count);
+		assert(++count <= enclaves->count);
 	}
 }
 
 void enclaves_read(struct enclaves *enclaves)
 {
-	FILE *fp;
-
 	/*
 	 * We track old and new entries, and have to swap which list
 	 * represents new.
@@ -310,7 +358,12 @@ void enclaves_read(struct enclaves *enclaves)
 	enclaves->state = new_state;
 	assert(enclaves->state_list[new_state].lh_first == NULL);
 
-	if (!(fp = fopen(SGX_ENCLAVES, "ro"))) {
+#ifdef DEBUG_READ
+	FILE *fp = enclave_input;
+#else
+	FILE *fp = fopen(SGX_ENCLAVES, "ro");
+#endif
+	if (!fp) {
 		fprintf(stderr, "Couldn't open %s\n", SGX_ENCLAVES);
 		exit(-1);
 	}
@@ -331,9 +384,11 @@ void enclaves_read(struct enclaves *enclaves)
 			 */
 			LIST_REMOVE(e, state_entry[old_state]);
 		} else {
-			e = malloc(sizeof(struct enclave_entry));
-			if (!e)
-				continue;  /* Skip it? */
+			e = calloc(1, sizeof(struct enclave_entry));
+			if (!e) {
+				fprintf(stderr, "malloc failed!\n");
+				exit(1);
+			}
 
 			e->enclave = enclave;
 			e->command = pid_read_command(e->enclave.pid);
@@ -344,13 +399,21 @@ void enclaves_read(struct enclaves *enclaves)
 		LIST_INSERT_HEAD(&enclaves->state_list[new_state],
 				 e, state_entry[new_state]);
 	}
+#ifndef DEBUG_READ
 	fclose(fp);
+#endif
 
 	int r = clock_gettime(CLOCK_MONOTONIC, &enclaves->readtime);
 	if (r) {
 		fprintf(stderr, "Clock failed to read!\n");
 		exit(-1);
 	}
+#ifdef DEBUG_WRITE
+	if (enclave_log) {
+		fprintf(enclave_log, "iteration %ld\n", enclaves->readtime.tv_sec);
+		fflush(enclave_log);
+	}
+#endif
 
 	/* Iterate over the table of old enclaves and remove each one. */
 	while (!LIST_EMPTY(&enclaves->state_list[old_state])) {
@@ -397,14 +460,11 @@ void enclaves_report(struct enclaves *enclaves)
 		 "PID", "ID", "Size", "EADDs", "Resident", "Command");
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
+		assert(count < enclaves->count);
 		list[count++] = e;
 	}
 
-	if (count != enclaves->count) {
-		/* XXX:  failing on asserts, so just logging issue */
-		mvprintw(LINES - 1, 0, "count (%u) != enclaves->count (%u)",
-			 count, enclaves->count);
-	}
+	assert(count == enclaves->count);
 
 	qsort(list, enclaves->count, sizeof(struct enclave_entry *),
 	      enclave_compar);
@@ -434,13 +494,25 @@ int main(int argc, char **argv)
 	struct stats old, new;
 	struct enclaves *enclaves = enclaves_create(101);
 
+	if (!enclaves) {
+		fprintf(stderr, "failed to create list of enclaves\n");
+		exit(-1);
+	}
+
 	do_init();
 
-	if (!enclaves)
-		exit(-1);
+#ifdef DEBUG_WRITE
+	enclave_log = fopen("/tmp/enclave_log", "w");
+	assert(enclave_log);
+#endif
+#ifdef DEBUG_READ
+	enclave_input = fopen("enclave_log", "r");
+	assert(enclave_input);
+#endif
 
-	if (stats_read(&new))
+	if (stats_read(&new)) {
 		exit(-1);
+	}
 
 	/* Fire up curses. */
 
@@ -449,10 +521,6 @@ int main(int argc, char **argv)
 	noecho();
 	curs_set(0);
 	clear();
-
-#ifdef DEBUG
-	enclave_log = fopen("/tmp/enclave_log", "w");
-#endif
 
 	struct timespec wait= new.readtime;
 	while (1) {
@@ -463,6 +531,9 @@ int main(int argc, char **argv)
 		if (stats_read(&new))
 			exit(-1);
 		enclaves_read(enclaves);
+#ifdef DEBUG_WRITE
+		enclaves_check_list(enclaves);
+#endif
 		stats_report(&old, &new);
 		enclaves_report(enclaves);
 		/* Accept input, for instance for a redraw? */
