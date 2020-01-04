@@ -46,17 +46,6 @@ struct enclave_entry {
 	LIST_ENTRY(enclave_entry) hash_entry;
 };
 
-/* DEBUG_WRITE will write out the sgx values read to repro issues */
-//#define DEBUG_WRITE
-/* DEBUG_READ will read from previously-logged values for debugging */
-//#define DEBUG_READ
-#ifdef DEBUG_WRITE
-FILE *enclave_log;
-#endif
-#ifdef DEBUG_READ
-FILE *enclave_input;
-#endif
-
 static int pid_width = 10;  /* pick a really big size and adjust down */
 
 /*
@@ -81,9 +70,6 @@ struct enclaves {
 
 void do_init()
 {
-#ifdef DEBUG_READ
-	pid_width = 10;
-#else
 	/* Some systems allow larger PIDs than the default of 32767.
 	 * Ensure that the fields look right for them. */
 
@@ -99,7 +85,6 @@ void do_init()
 		}
 	}
 	fclose(fp);
-#endif
 }
 
 long int timespec_diff(struct timespec *later, struct timespec *earlier)
@@ -132,23 +117,17 @@ int stats_read(struct stats *stats)
 {
 	FILE *fp;
 
-#ifdef DEBUG_READ
-	fp = enclave_input;
-#else
 	if (!(fp = fopen(SGX_STATS, "ro"))) {
 		fprintf(stderr, "failed to read %s\n", SGX_STATS);
 		return -1;
 	}
-#endif
 
 	int r = fscanf(fp, "%u %u %lu %lu %lu %u %u %u\n",
 		       &stats->enclaves_created, &stats->enclaves_released,
 		       &stats->pages_added, &stats->pageins, &stats->pageouts,
 		       &stats->enclave_pages, &stats->va_pages,
 		       &stats->free_pages);
-#ifndef DEBUG_READ
 	fclose(fp);
-#endif
 	if (r != 8) {
 		fprintf(stderr, "expect to read %d entries from %s, got %d\n",
 			8, SGX_STATS, r);
@@ -161,16 +140,6 @@ int stats_read(struct stats *stats)
 			r, errno);
 		return r;
 	}
-#ifdef DEBUG_WRITE
-	if (enclave_log) {
-		fprintf(enclave_log, "%u %u %lu %lu %lu %u %u %u\n",
-			stats->enclaves_created, stats->enclaves_released,
-			stats->pages_added, stats->pageins, stats->pageouts,
-			stats->enclave_pages, stats->va_pages,
-			stats->free_pages);
-		fflush(enclave_log);
-	}
-#endif
 
 	return 0;
 }
@@ -246,30 +215,12 @@ int enclave_read(FILE *fp, struct enclave *enclave)
 {
 	char line[80];
 
-#ifdef DEBUG_READ
-	assert(fgets(line, sizeof(line), fp));
-	int r = sscanf(line, "%d %u %lu %lu %lu\n",
-		       &enclave->pid, &enclave->id,
-		       &enclave->size, &enclave->eadd_cnt,
-		       &enclave->resident);
-#else
 	int r = fscanf(fp, "%d %u %lu %lu %lu",
 		       &enclave->pid, &enclave->id,
 		       &enclave->size, &enclave->eadd_cnt,
 		       &enclave->resident);
-#endif
 	if (r != 5)
 		return -1;
-
-#ifdef DEBUG_WRITE
-	if (enclave_log) {
-		fprintf(enclave_log, "%d %u %lu %lu %lu\n",
-			enclave->pid, enclave->id,
-			enclave->size, enclave->eadd_cnt,
-			enclave->resident);
-		fflush(enclave_log);
-	}
-#endif
 
 	return 0;
 }
@@ -358,11 +309,7 @@ void enclaves_read(struct enclaves *enclaves)
 	enclaves->state = new_state;
 	assert(enclaves->state_list[new_state].lh_first == NULL);
 
-#ifdef DEBUG_READ
-	FILE *fp = enclave_input;
-#else
 	FILE *fp = fopen(SGX_ENCLAVES, "ro");
-#endif
 	if (!fp) {
 		fprintf(stderr, "Couldn't open %s\n", SGX_ENCLAVES);
 		exit(-1);
@@ -399,21 +346,13 @@ void enclaves_read(struct enclaves *enclaves)
 		LIST_INSERT_HEAD(&enclaves->state_list[new_state],
 				 e, state_entry[new_state]);
 	}
-#ifndef DEBUG_READ
 	fclose(fp);
-#endif
 
 	int r = clock_gettime(CLOCK_MONOTONIC, &enclaves->readtime);
 	if (r) {
 		fprintf(stderr, "Clock failed to read!\n");
 		exit(-1);
 	}
-#ifdef DEBUG_WRITE
-	if (enclave_log) {
-		fprintf(enclave_log, "iteration %ld\n", enclaves->readtime.tv_sec);
-		fflush(enclave_log);
-	}
-#endif
 
 	/* Iterate over the table of old enclaves and remove each one. */
 	while (!LIST_EMPTY(&enclaves->state_list[old_state])) {
@@ -501,15 +440,6 @@ int main(int argc, char **argv)
 
 	do_init();
 
-#ifdef DEBUG_WRITE
-	enclave_log = fopen("/tmp/enclave_log", "w");
-	assert(enclave_log);
-#endif
-#ifdef DEBUG_READ
-	enclave_input = fopen("enclave_log", "r");
-	assert(enclave_input);
-#endif
-
 	if (stats_read(&new)) {
 		exit(-1);
 	}
@@ -531,7 +461,7 @@ int main(int argc, char **argv)
 		if (stats_read(&new))
 			exit(-1);
 		enclaves_read(enclaves);
-#ifdef DEBUG_WRITE
+#ifdef DEBUG
 		enclaves_check_list(enclaves);
 #endif
 		stats_report(&old, &new);
