@@ -21,20 +21,18 @@ and the total number of enclaves created since the driver was started.
 This is useful for monitoring overall usage -- large numbers of
 enclaves created might indicate an issue with enclaves failing.
 .PP
-On the far right of the display,
+Below that, we track page-ins and page-outs per second.
+.PP
+Then,
 .B sgxtop
-displays the enclave memory in use.  The total available enclave memory
+displays the Enclave Page Cache (EPC) memory usage.
+The total available enclave memory
 is rather limited, as this space is dedicated to SGX, and cannot be used
 by the rest of the system, even when no SGX enclaves have been created.
-The total memory is displayed on the far right, before that the memory
-is use, and before that the version arrays in use (each page swapped out
-records eight bytes of integrity data, so the more pages are swapped out,
-the more VA memory is in use).
-.PP
-Below that, we track page-ins and page-outs, and the maximum page-ins
-and page-outs observed since
-.B sgxtop
-started.
+The total memory available is display, then the free memory, then the
+memory in use, and finally the memory dedicated to the version arrays in
+use (each page swapped out records eight bytes of integrity data, so the
+more pages are swapped out, the more VA memory is in use).
 .PP
 Finally, we list the enclaves running on the system.  We show the process
 id (one process can have multiple enclaves -- for instance, Intel's
@@ -43,8 +41,8 @@ the actual pages added to the enclave (always less than or equal to the size),
 the resident memory dedicated by SGX to the enclave, and the process command
 name (shortened by the kernel).
 .PP
-The resident pages can change dramatically if multiple enclaves are in
-use.  The SGX driver pages out the last-used memory, so that enclaves
+The resident page count can change dramatically if multiple enclaves are in
+use.  The SGX driver pages out the oldest memory, so that enclaves
 are quickly stripped of their memory, and new enclaves grab lots of
 memory.
 .SH FILES

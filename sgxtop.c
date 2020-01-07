@@ -152,23 +152,32 @@ void stats_report(struct stats *old, struct stats *new)
 {
 	char enclave_str[80];
 
-	snprintf(enclave_str, sizeof(enclave_str), "%u/%u",
-		 new->enclaves_created - new->enclaves_released,
-		 new->enclaves_created);
 	if (sgxtop)
-		mvprintw(0, 0, "%15s enclaves/created", enclave_str);
+		mvprintw(0, 0, "Enclaves running:  %3u  Total enclaves created:  %u",
+			 new->enclaves_created - new->enclaves_released,
+			 new->enclaves_created);
 	else
-		printf("%15s enclaves/created", enclave_str);
+		printf("Enclaves running:  %3u  Total enclaves created:  %u\n",
+		       new->enclaves_created - new->enclaves_released,
+		       new->enclaves_created);
 
 
+	unsigned int total = new->enclave_pages;
 	snprintf(enclave_str, sizeof(enclave_str), "%uK/%uK/%uK",
 		 new->va_pages * 4,
 		 (new->enclave_pages - new->free_pages) * 4,
 		 new->enclave_pages * 4);
 	if (sgxtop)
-		printw("  %30s va/used/tot mem", enclave_str);
+		mvprintw(2, 0, "EPC mem: %11uK free: %11uK used: %11uK VA: %11uK",
+			 new->enclave_pages * 4,
+			 new->free_pages * 4,
+			 (new->enclave_pages - new->free_pages) * 4,
+			 new->va_pages * 4);
 	else
-		printf("  %30s va/used/tot mem\n\n", enclave_str);
+		printf("EPC mem: %11uK free: %11uK used: %11uK VA: %11uK\n\n",
+		       new->enclave_pages * 4, new->free_pages * 4,
+		       (new->enclave_pages - new->free_pages) * 4,
+		       new->va_pages * 4);
 
 	/* sgxstats doesn't report time-depended data */
 	if (!sgxtop)
@@ -186,23 +195,9 @@ void stats_report(struct stats *old, struct stats *new)
 		pageouts = 0;
 	}
 
-	static long unsigned max_pageins;
-	static long unsigned max_pageouts;
-
-	/*
-	 * Only update the max paging rates if we got a decent sample
-	 * size;  in some cases we see extremely short delays.
-	 */
-	if (pageins > max_pageins)
-		max_pageins = pageins;
-	if (pageouts > max_pageouts)
-		max_pageouts = pageouts;
 	mvprintw(1, 0,
-		 "%10luK pageins (per sec)    %10luK max pageins (per sec)",
-		 pageins, max_pageins);
-	mvprintw(2, 0,
-		 "%10luK pageouts (per sec)   %10luK max pageouts (per sec)",
-		 pageouts, max_pageouts);
+		 "EPC paging per second,  in:  %10luK out:   %10luK",
+		 pageins, pageouts);
 	refresh();
 }
 
