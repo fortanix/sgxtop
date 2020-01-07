@@ -177,7 +177,7 @@ void stats_report(struct stats *old, struct stats *new)
 	long int time_diff = timespec_diff(&new->readtime, &old->readtime);
 
 	long unsigned pageins = new->pageins - old->pageins;
-	long unsigned pageouts = new->pageins - old->pageins;
+	long unsigned pageouts = new->pageouts - old->pageouts;
 	if (time_diff != 0) {
 		pageins = 4 * pageins * NSEC_PER_SEC / time_diff;
 		pageouts = 4 * pageouts * NSEC_PER_SEC / time_diff;
