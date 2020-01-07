@@ -8,6 +8,7 @@
 #include <curses.h>
 #include <stdlib.h>
 #include <string.h>
+#include <ctype.h>
 #include <sys/types.h>
 #include <assert.h>
 #include <unistd.h>
@@ -47,6 +48,8 @@ struct enclave_entry {
 };
 
 static int pid_width = 10;  /* pick a really big size and adjust down */
+static bool sgxtop = true;  /* sgxtop (continuous reporting) or sgxstat
+			     * (one shot) */
 
 /*
  * Keep an old and a new  list of enclaves, and a hash table.
@@ -147,18 +150,29 @@ int stats_read(struct stats *stats)
 
 void stats_report(struct stats *old, struct stats *new)
 {
-	char enclave_str[COLS];
+	char enclave_str[80];
 
 	snprintf(enclave_str, sizeof(enclave_str), "%u/%u",
 		 new->enclaves_created - new->enclaves_released,
 		 new->enclaves_created);
-	mvprintw(0, 0, "%15s enclaves/created", enclave_str);
+	if (sgxtop)
+		mvprintw(0, 0, "%15s enclaves/created", enclave_str);
+	else
+		printf("%15s enclaves/created", enclave_str);
+
 
 	snprintf(enclave_str, sizeof(enclave_str), "%uK/%uK/%uK",
 		 new->va_pages * 4,
 		 (new->enclave_pages - new->free_pages) * 4,
 		 new->enclave_pages * 4);
-	printw("  %30s va/used/tot mem", enclave_str);
+	if (sgxtop)
+		printw("  %30s va/used/tot mem", enclave_str);
+	else
+		printf("  %30s va/used/tot mem\n\n", enclave_str);
+
+	/* sgxstats doesn't report time-depended data */
+	if (!sgxtop)
+		return;
 
 	long int time_diff = timespec_diff(&new->readtime, &old->readtime);
 
@@ -237,7 +251,7 @@ int enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
 	if (e->command) {
 		free(e->command);
 	}
-    memset(e, 0, sizeof(struct enclave_entry));
+	memset(e, 0, sizeof(struct enclave_entry));
 	free(e);
 }
 
@@ -371,7 +385,9 @@ int enclave_compar(const void *fv, const void *sv)
 
 	/*
 	 * Simple sort by resident set size and ID;  note that we
-	 * have to be careful about signed arithmetic.
+	 * have to be careful about signed arithmetic.  And invert
+	 * the check to put the most active and earliest enclaves
+	 * first.
 	 */
 	long long int rc = (long long int) (*f)->resident -
 		(long long int) (*s)->resident;
@@ -379,9 +395,9 @@ int enclave_compar(const void *fv, const void *sv)
 	if (rc == 0)
 		rc = (long long) (*f)->id - (long long) (*s)->id;
 
-	if (rc > 1)
+	if (rc < 1)
 		return 1;
-	else if (rc < 1)
+	else if (rc > 1)
 		return -1;
 	else
 		return 0;
@@ -395,8 +411,12 @@ void enclaves_report(struct enclaves *enclaves)
 	size_t count = 0;
 	static unsigned last_lines;
 
-	mvprintw(line++, 0, "%*s %10s %11s %11s %11s %10s", pid_width,
-		 "PID", "ID", "Size", "EADDs", "Resident", "Command");
+	if (sgxtop)
+		mvprintw(line++, 0, "%*s %10s %11s %11s %11s %10s", pid_width,
+			 "PID", "ID", "Size", "EADDs", "Resident", "Command");
+	else
+		printf("%*s %10s %11s %11s %11s %10s\n", pid_width,
+		       "PID", "ID", "Size", "EADDs", "Resident", "Command");
 	LIST_FOREACH(e, &enclaves->state_list[enclaves->state],
 		     state_entry[enclaves->state]) {
 		assert(count < enclaves->count);
@@ -408,15 +428,29 @@ void enclaves_report(struct enclaves *enclaves)
 	qsort(list, enclaves->count, sizeof(struct enclave_entry *),
 	      enclave_compar);
 
-	for (count = 0; line < LINES && count < enclaves->count;
+	for (count = 0; count < enclaves->count;
 	     count++, line++) {
 		assert(line <= enclaves->count + 4 /* initial count */);
 		e = list[count];
-		mvprintw(line, 0, "%*d %10u %10luK %10luK %10luK %s",
-			 pid_width, e->enclave.pid, e->enclave.id,
-			 e->enclave.size / 1024, e->enclave.eadd_cnt * 4,
-			 e->enclave.resident * 4, e->command ? e->command : "");
+		if (sgxtop)
+			mvprintw(line, 0, "%*d %10u %10luK %10luK %10luK %s",
+				 pid_width, e->enclave.pid, e->enclave.id,
+				 e->enclave.size / 1024,
+				 e->enclave.eadd_cnt * 4,
+				 e->enclave.resident * 4,
+				 e->command ? e->command : "");
+		else
+			printf("%*d %10u %10luK %10luK %10luK %s",
+			       pid_width, e->enclave.pid, e->enclave.id,
+			       e->enclave.size / 1024, e->enclave.eadd_cnt * 4,
+			       e->enclave.resident * 4,
+			       e->command ? e->command : "");
+		if (sgxtop && line >= LINES)
+			break;
 	}
+
+	if (!sgxtop)
+		return;
 
 	/* Clear any leftover lines from the last display */
 	int current_lines = line;
@@ -444,6 +478,27 @@ int main(int argc, char **argv)
 		exit(-1);
 	}
 
+
+	/*
+	 * Somewhat hackily let this executable run as either
+	 * sgxtop (with continuous, top-style updates to the screen),
+	 * or sgxstat (with a one-shot report).
+	 */
+
+	char *command = argv[0] + strlen(argv[0]) - 1;
+	while (command > argv[0] && isalpha(*command))
+		command--;
+	if (command != argv[0])
+		command++;
+
+	if (strcmp(command, "sgxstat") == 0) {
+		sgxtop = false;
+		enclaves_read(enclaves);
+		stats_report(NULL, &new);
+		enclaves_report(enclaves);
+		return 0;
+	}
+
 	/* Fire up curses. */
 
 	initscr();
@@ -452,7 +507,7 @@ int main(int argc, char **argv)
 	curs_set(0);
 	clear();
 
-	struct timespec wait= new.readtime;
+	struct timespec wait = new.readtime;
 	while (1) {
 		old = new;
 		wait.tv_sec++;
