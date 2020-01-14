@@ -4,7 +4,7 @@ This is Fortanix's SGX monitoring application, built to
 interoperate with our SGX driver extensions that export
 SGX usage information.
 
-It'll list the enclave count, over-all enclave memory use,
+It'll list the enclave count, overall enclave memory use,
 paging rates, and the enclaves in use, along with their
 memory usage and information about the owning process.
 
