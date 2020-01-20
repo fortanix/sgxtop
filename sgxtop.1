@@ -1,8 +1,10 @@
 .TH SGXTOP 1
 .SH NAME
-sgxtop \- display running Intel SGX enclaves and statistics
+sgxtop, sgxtop \- display Intel SGX enclaves and statistics
 .SH SYNOPSIS
 .B sgxtop
+.br
+.B sgxstat
 .SH DESCRIPTION
 .\" ragged-right and no hyphenation
 .na
@@ -10,22 +12,31 @@ sgxtop \- display running Intel SGX enclaves and statistics
 .PP
 Intel's SGX extensions allow the creation of userland enclaves, protected
 from both kernel and low-level hardware access.
+.PP
 .B sgxtop
 provides a real-time view of the list of enclaves running on the system,
 their resource usage, and the overall enclave resources usage.
+.B sgxstat
+provides a quick one-time display of enclaves and statistics
+(essentially a snapshot of
+.B sgxtop
+output).
 .SH OVERVIEW
 .PP
 .B sgxtop
-starts out by displaying the number of enclaves current running,
+and
+.B sgxstat
+start out by displaying the number of enclaves current running,
 and the total number of enclaves created since the driver was started.
 This is useful for monitoring overall usage -- large numbers of
 enclaves created might indicate an issue with enclaves failing.
 .PP
 Below that, we track page-ins and page-outs per second.
+.B sgxstat displays only snapshot information, so does not show this
+information.
 .PP
-Then,
-.B sgxtop
-displays the Enclave Page Cache (EPC) memory usage.
+Then, the utilities
+display the Enclave Page Cache (EPC) memory usage.
 The total available enclave memory
 is rather limited, as this space is dedicated to SGX, and cannot be used
 by the rest of the system, even when no SGX enclaves have been created.
@@ -34,15 +45,15 @@ memory in use, and finally the memory dedicated to the version arrays in
 use (each page swapped out records eight bytes of integrity data, so the
 more pages are swapped out, the more VA memory is in use).
 .PP
-Finally, we list the enclaves running on the system.  We show the process
-id (one process can have multiple enclaves -- for instance, Intel's
-aesm service requires two), the requested size (always powers of two),
-the actual pages added to the enclave (always less than or equal to the size),
-the resident memory dedicated by SGX to the enclave, and the process command
-name (shortened by the kernel).
+Finally, we list the enclaves running on the system.  We show the
+process id (one process can have multiple enclaves -- for instance,
+Intel's aesm service requires two), the requested size (always powers
+of two), the actual pages added to the enclave (always less than or
+equal to the size), the resident memory dedicated by SGX to the enclave,
+and the process command name (shortened by the kernel).
 .PP
-The resident page count can change dramatically if multiple enclaves are in
-use.  The SGX driver pages out the oldest memory, so that enclaves
+The resident page count can change dramatically if multiple enclaves are
+in use.  The SGX driver pages out the oldest memory, so that enclaves
 are quickly stripped of their memory, and new enclaves grab lots of
 memory.
 .SH FILES
