@@ -102,10 +102,9 @@ long int timespec_diff(struct timespec *later, struct timespec *earlier)
 
 int sleep_til(struct timespec *when)
 {
-	struct timespec rem;
 	int rc;
-	while (rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
-				    when, NULL)) {
+	while ((rc = clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME,
+				     when, NULL)) != 0) {
 		if (rc != EINTR) {
 			fprintf(stderr,
 				"clock_nanosleep(2) returned %d, errno %d\n",
@@ -162,7 +161,6 @@ void stats_report(struct stats *old, struct stats *new)
 		       new->enclaves_created);
 
 
-	unsigned int total = new->enclave_pages;
 	snprintf(enclave_str, sizeof(enclave_str), "%uK/%uK/%uK",
 		 new->va_pages * 4,
 		 (new->enclave_pages - new->free_pages) * 4,
@@ -213,17 +211,17 @@ char *pid_read_command(pid_t pid)
 	if (!fp)
 		return NULL;
 
-	fgets(command, sizeof(command), fp);
+	result = fgets(command, sizeof(command), fp);
 	fclose(fp);
 
-	result = strdup(command);
+	if (result)
+		result = strdup(result);
+
 	return result;
 }
 
 int enclave_read(FILE *fp, struct enclave *enclave)
 {
-	char line[80];
-
 	int r = fscanf(fp, "%d %u %lu %lu %lu",
 		       &enclave->pid, &enclave->id,
 		       &enclave->size, &enclave->eadd_cnt,
@@ -234,13 +232,13 @@ int enclave_read(FILE *fp, struct enclave *enclave)
 	return 0;
 }
 
-int enclave_update(struct enclave_entry *o, struct enclave *n, unsigned which)
+void enclave_update(struct enclave_entry *o, struct enclave *n, unsigned which)
 {
 	assert(o->enclave.id == n->id && o->enclave.pid == n->pid);
 	o->enclave = *n;
 }
 
-int enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
+void enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
 		    unsigned which)
 {
 	if (e->command) {
@@ -252,20 +250,21 @@ int enclave_delete(struct enclaves *enclaves, struct enclave_entry *e,
 
 size_t hash_func(struct enclaves *e, unsigned int id)
 {
-	// Ugh!
 	return id % e->hash_table_size;
 }
 
 struct enclaves *enclaves_create(size_t n)
 {
-	struct enclaves *e = calloc(sizeof(struct enclaves), 1);
+	struct enclaves *e = calloc(1, sizeof(struct enclaves));
 	if (!e)
 		return NULL;
 
 	e->hash_table_size = n;
 	e->hash_table = malloc(sizeof(struct enclave_head) * n);
-	if (!e->hash_table)
+	if (!e->hash_table) {
+		free(e);
 		return NULL;
+	}
 
 	for (int i = 0; i < n; i++)
 		LIST_INIT(&e->hash_table[i]);
@@ -273,6 +272,8 @@ struct enclaves *enclaves_create(size_t n)
 	e->state = 0;
 	LIST_INIT(&e->state_list[0]);
 	LIST_INIT(&e->state_list[1]);
+
+	return e;
 }
 
 struct enclave_entry *enclaves_find(struct enclaves *enclaves, unsigned int id)
@@ -288,7 +289,7 @@ struct enclave_entry *enclaves_find(struct enclaves *enclaves, unsigned int id)
 	return NULL;
 }
 
-int enclaves_insert(struct enclaves *enclaves, struct enclave_entry *e)
+void enclaves_insert(struct enclaves *enclaves, struct enclave_entry *e)
 {
 	size_t bucket = hash_func(enclaves, e->enclave.id);
 	LIST_INSERT_HEAD(&enclaves->hash_table[bucket], e, hash_entry);
@@ -331,7 +332,7 @@ void enclaves_read(struct enclaves *enclaves)
 	while (!enclave_read(fp, &enclave)) {
 		enclaves->count++;
 
-		if (e = enclaves_find(enclaves, enclave.id)) {
+		if ((e = enclaves_find(enclaves, enclave.id)) != NULL) {
 			enclave_update(e, &enclave, old_state);
 			/*
 			 * Since this enclave was in the hash table,
@@ -460,8 +461,9 @@ void enclaves_report(struct enclaves *enclaves)
 int main(int argc, char **argv)
 {
 	struct stats old, new;
-	struct enclaves *enclaves = enclaves_create(101);
+	struct enclaves *enclaves = NULL;
 
+	enclaves = enclaves_create(101);
 	if (!enclaves) {
 		fprintf(stderr, "failed to create list of enclaves\n");
 		exit(-1);
