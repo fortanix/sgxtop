@@ -8,6 +8,19 @@ It'll list the enclave count, overall enclave memory use,
 paging rates, and the enclaves in use, along with their
 memory usage and information about the owning process.
 
+# Build
+
+- Maintainer:
+  Run $./maintainer.sh for makefile, build, install and cleanup.
+  Build dependencies: autoconf automake m4.
+  (installing autoconf installs all other required dependencies).
+
+- User:
+  Run $./build.sh for the sgxtop.
+  Look at $./configure --help for more options.
+
+  Run $./cleanup.sh for cleaning up build/binaries.
+
 # Contributing
 
 We gratefully accept bug reports and contributions from the community.
