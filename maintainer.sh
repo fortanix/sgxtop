@@ -6,6 +6,11 @@ autoconf # Generate configure from configure.ac
 automake --add-missing # Generate Makefile.in from Makefile.am
 
 #Test configure & build
-./build.sh
+./configure --prefix=$PWD
+make
+make install
+
 #Cleanup
-./cleanup.sh
+#files created by auto* tools (m4 files, configure etc) will remain.
+make clean
+make uninstall

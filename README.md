@@ -16,10 +16,10 @@ memory usage and information about the owning process.
   (installing autoconf installs all other required dependencies).
 
 - User:
-  Run $./build.sh for the sgxtop.
-  Look at $./configure --help for more options.
+  After creating configure (steps in./maintainer.sh)
+  Run $./configure; make; make install
+  $./configure --help for more options.
 
-  Run $./cleanup.sh for cleaning up build/binaries.
 
 # Contributing
 
