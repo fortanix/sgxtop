@@ -20,6 +20,9 @@
 #define SGX_STATS	"/proc/sgx_stats"
 #define SGX_ENCLAVES	"/proc/sgx_enclaves"
 
+/* The number of hash buckets to create, not the limit on enclaves */
+#define ENCLAVE_BUCKETS 101
+
 struct stats {
 	unsigned int enclaves_created;
 	unsigned int enclaves_released;
@@ -463,7 +466,7 @@ int main(int argc, char **argv)
 	struct stats old, new;
 	struct enclaves *enclaves = NULL;
 
-	enclaves = enclaves_create(101);
+	enclaves = enclaves_create(ENCLAVE_BUCKETS);
 	if (!enclaves) {
 		fprintf(stderr, "failed to create list of enclaves\n");
 		exit(-1);
