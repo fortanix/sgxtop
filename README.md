@@ -12,7 +12,7 @@ memory usage and information about the owning process.
 
 - Maintainer:
   Run $./maintainer.sh for makefile, build, install and cleanup.
-  Build dependencies: autoconf automake m4.
+  Build dependencies: autoconf automake m4 and clang
   (installing autoconf installs all other required dependencies).
 
 - User:

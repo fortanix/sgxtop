@@ -9,7 +9,7 @@ AC_CONFIG_SRCDIR([sgxtop.c])
 #AC_CONFIG_HEADERS([config.h])
 
 # Checks for programs.
-: ${CFLAGS="-O0  -g"}
+: ${CFLAGS="-g -Wall"}
 AC_PROG_CC
 
 # Checks for libraries.

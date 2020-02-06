@@ -6,7 +6,7 @@ autoconf # Generate configure from configure.ac
 automake --add-missing # Generate Makefile.in from Makefile.am
 
 #Test configure & build
-./configure --prefix=$PWD
+./configure --prefix=$PWD CC=clang
 make
 make install
 
