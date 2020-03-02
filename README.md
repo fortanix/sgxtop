@@ -36,6 +36,8 @@ daemon which is probably running at least one or two enclaves on
 your system, then remove the current driver, install the new one,
 and restart the aesm daemon.
 
+Here are the instructions to make it work on Ubuntu 16.04:
+
 ``` sh
 $ git clone https://github.com/fortanix/linux-sgx-driver
 $ cd linux-sgx-driver
