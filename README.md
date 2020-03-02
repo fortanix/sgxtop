@@ -1,25 +1,61 @@
 # sgxtop
 
-This is Fortanix's SGX monitoring application, built to
-interoperate with our SGX driver extensions that export
-SGX usage information.
+This is Fortanix's SGX monitoring application, built to interoperate
+with our SGX driver extensions that export SGX usage information.
 
-It'll list the enclave count, overall enclave memory use,
-paging rates, and the enclaves in use, along with their
-memory usage and information about the owning process.
+It'll list the enclave count, overall enclave memory use, paging rates,
+and the enclaves in use, along with their memory usage and information
+about the owning process.
+
+# Usage
+
+
+``` sh
+$ sgxstat
+$ sgxtop
+```
 
 # Build
 
-- Maintainer:
-  Run $./maintainer.sh for makefile, build, install and cleanup.
-  Build dependencies: autoconf automake m4 and clang
-  (installing autoconf installs all other required dependencies).
+Build dependencies: autoconf automake m4
 
-- User:
-  After creating configure (steps in./maintainer.sh)
-  Run $./configure; make; make install
-  $./configure --help for more options.
+Set up the makefile, etc., from the autotools:
 
+``` sh
+$ ./maintainer.sh
+$ ./configure
+$ make
+$ sudo make install
+```
+
+# Driver Installation
+
+In order to use this, you'll need to rebuild your isgx driver using
+our monitoring extensions.  You'll then need to stop the Intel aesm
+daemon which is probably running at least one or two enclaves on
+your system, then remove the current driver, install the new one,
+and restart the aesm daemon.
+
+Here are the instructions to make it work on Ubuntu 16.04:
+
+``` sh
+$ git clone https://github.com/fortanix/linux-sgx-driver
+$ cd linux-sgx-driver
+$ make
+$ sudo make install
+$ sudo systemctl stop aesmd
+$ sudo rmmod isgx
+$ sudo insmod isgx.ko
+$ sudo systemctl start aesmd
+```
+
+# Documentation
+
+Check the man page for more details:
+
+``` sh
+$ nroff -man sgxtop.1
+```
 
 # Contributing
 
